@@ -1,0 +1,15 @@
+{
+    "d174093b97263477caceea79d830f8f4": {
+        "unique_device_id": "Google|ba4b638a-3177-431e-b5c3-c87f730aa15e",
+        "brand": "Vivo",
+        "model": "V2203",
+        "gpu_renderer": "Mali-G710",
+        "system_software": "Android OS 12 / API-31",
+        "screen_width": 1280,
+        "screen_height": 2400,
+        "screen_dpi": "399",
+        "memory": 2831,
+        "processor_details": "ARM64 FP ASIMD AES VMH | 2394 | 12",
+        "client_ip": "152.202.168.139"
+    }
+}
