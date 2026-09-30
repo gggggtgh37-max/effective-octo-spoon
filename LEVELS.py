@@ -29,28 +29,14 @@ from Crypto.Util.Padding import pad
 from protobuf_decoder.protobuf_decoder import Parser
 from message_ids import MESSAGE_ID_TO_NAME
 import thunderFF_pb2
-import aiohttp
-import ssl
-import MajoRLoGinrEq_pb2
-import MajoRLoGinrEs_pb2
 
 # ==================== WEB DASHBOARD ====================
 from dashboard_server import bot_state, start_web_dashboard
 
 # ==================== CONFIGURATION ====================
 WEB_HOST = "0.0.0.0"
-def _find_free_port(start=20335):
-    import socket as _s
-    for p in range(start, start + 20):
-        try:
-            with _s.socket(_s.AF_INET, _s.SOCK_STREAM) as sock:
-                sock.bind(('0.0.0.0', p))
-                return p
-        except OSError:
-            continue
-    return start + 20
-
-WEB_PORT = int(os.environ.get("PORT", 0)) or _find_free_port(20335)
+WEB_PORT = int(os.environ.get("PORT", "20335"))
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://effective-octo-spoon.onrender.com")
 ACCOUNTS_FILE = "accounts.json"
 TOKEN_CACHE_FILE = "token_cache.json"
 DEVICES_FILE = "devices.json"  # 🔥 NEW: Persistent device storage
@@ -60,7 +46,7 @@ TOKEN_CACHE_TTL = 1200
 START_MATCH_INTERVAL = 3.0
 NEW_MATCH_DELAY = 3.0   
 MAX_MATCH_DURATION = 700
-MATCH_IDLE_TIMEOUT = 5.0
+MATCH_IDLE_TIMEOUT = 8.0
 PRIORITY_REGIONS = ["BD","IND", "SG", "TH", "PH", "VN", "MY", "ID", "HK", "TW"]
 
 # 🔥 Cache invalidation thresholds
@@ -114,7 +100,7 @@ def get_device_for_account(account_identifier: str) -> dict:
         "screen_dpi": str(random.randint(300, 420)),
         "memory": random.randint(2800, 6500),
         "processor_details": f"ARM64 FP ASIMD AES VMH | {random.randint(2200, 3200)} | {random.randint(6, 12)}",
-        "client_ip": f"{random.choice(['49', '103', '117', '122', '152'])}.{random.randint(10, 250)}.{random.randint(10, 250)}.{random.randint(10, 250)}"
+        "client_ip": f"{random.randint(103, 223)}.{random.randint(10, 250)}.{random.randint(10, 250)}.{random.randint(10, 250)}"
     }
     
     devices[acc_key] = new_device
@@ -234,163 +220,24 @@ def optimize_udp_socket(sock: socket.socket):
 # ==================== NETWORK & CRYPTO ====================
 client = httpx.AsyncClient(
     verify=False,
-    timeout=30.0,
+    timeout=10.0,
     limits=httpx.Limits(max_connections=100, max_keepalive_connections=50)
 )
 
 headers = {
-    'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 11; ASUS_Z01QD Build/PI)',
+    'User-Agent': 'UnityPlayer/2018.4.12f1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)',
     'Connection': 'Keep-Alive',
     'Accept-Encoding': 'gzip',
     'Content-Type': 'application/x-www-form-urlencoded',
     'Expect': '100-continue',
-    'X-Unity-Version': '2018.4.11f1',
-    'X-GA': 'v1 1',
-    'ReleaseVersion': 'OB54'
-}
-
-AES_KEY = b'Yg&tc%DEuh6%Zc^8'
-AES_IV = b'6oyZDr22E3ychjM%'
-
-IND_HEADERS = {
-    'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 11; ASUS_Z01QD Build/PI)',
-    'Connection': 'Keep-Alive',
-    'Accept-Encoding': 'gzip',
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'Expect': '100-continue',
-    'X-Unity-Version': '2018.4.11f1',
+    'X-Unity-Version': '2018.4.12f1',
+    'X-GA-SV': '1789535859',
     'X-GA': 'v1 1',
     'ReleaseVersion': 'OB55'
 }
 
-async def _ind_encrypted_proto(encoded_hex):
-    key = b'Yg&tc%DEuh6%Zc^8'
-    iv = b'6oyZDr22E3ychjM%'
-    cipher = AES.new(key, AES.MODE_CBC, iv)
-    padded_message = pad(encoded_hex, AES.block_size)
-    return cipher.encrypt(padded_message)
-
-async def _ind_build_majorlogin(open_id, access_token):
-    """Build + AES-encrypt MajorLogin using the persistent per-account device profile.
-    Do NOT send public JWT-generator fingerprints (extra_info / shared APK hashes)
-    — those trigger HTTP 200 + 'Protection Bypass'.
-    """
-    dev = get_device_for_account(open_id)
-    ml = MajoRLoGinrEq_pb2.MajorLogin()
-    ml.event_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ml.game_name = "free fire"
-    ml.platform_id = 4          # Guest
-    ml.client_version = "1.132.9"
-    ml.system_software = dev.get("system_software", "Android OS 12 / API-31")
-    ml.system_hardware = "Handheld"
-    ml.telecom_operator = "WIFI"
-    ml.network_type = "WIFI"
-    ml.screen_width = int(dev.get("screen_width", 1080))
-    ml.screen_height = int(dev.get("screen_height", 2400))
-    ml.screen_dpi = str(dev.get("screen_dpi", "400"))
-    ml.processor_details = dev.get("processor_details", "ARM64 FP ASIMD AES | 2400 | 8")
-    ml.memory = int(dev.get("memory", 4000))
-    ml.gpu_renderer = dev.get("gpu_renderer", "Adreno (TM) 650")
-    ml.gpu_version = "OpenGL ES 3.2"
-    ml.unique_device_id = dev.get("unique_device_id") or f"Google|{uuid.uuid4()}"
-    ml.client_ip = dev.get("client_ip", "49.36.100.210")
-    ml.language = "en"
-    ml.open_id = open_id
-    ml.open_id_type = "4"
-    ml.device_type = "Handheld"
-    ml.device_model = f"{dev.get('brand', 'Samsung')} {dev.get('model', 'SM-G998B')}"
-    ml.region = "IND"
-    ml.access_token = access_token
-    ml.platform_sdk_id = 1
-    ml.network_operator_a = "WIFI"
-    ml.network_type_a = "WIFI"
-    ml.external_storage_total = 64000
-    ml.external_storage_available = 32000
-    ml.internal_storage_total = 8000
-    ml.internal_storage_available = 3000
-    ml.game_disk_storage_available = 28000
-    ml.game_disk_storage_total = 64000
-    ml.external_sdcard_avail_storage = 28000
-    ml.external_sdcard_total_storage = 64000
-    ml.login_by = 4
-    ml.reg_avatar = 1
-    ml.channel_type = 6
-    ml.cpu_type = 2
-    ml.cpu_architecture = "64"
-    ml.client_version_code = "2019121229"
-    ml.graphics_api = "OpenGLES3"
-    ml.supported_astc_bitset = 16383
-    ml.login_open_id_type = 4
-    ml.loading_time = random.randint(4000, 12000)
-    ml.if_push = 1
-    ml.is_vpn = 0
-    ml.origin_platform_type = "4"
-    ml.primary_platform_type = "4"
-    ml.platform_str = "4"
-    ml.main_active_platform = "4"
-    return await _ind_encrypted_proto(ml.SerializeToString())
-
-async def _ind_send_majorlogin(payload, release_version):
-    # Multiple login clusters + Smart DNS (IP + Host header) so Termux/Android
-    # still works when the system resolver returns "No address associated with hostname".
-    _servers = [
-        "https://loginbp.ppmainecoonghj.com/MajorLogin",
-        "https://loginbp.ggblueshark.com/MajorLogin",
-        "https://loginbp.ggpolarbear.com/MajorLogin",
-        "https://loginbp.ggwhitehawk.com/MajorLogin",
-        "https://loginbp.common.ggbluefox.com/MajorLogin",
-    ]
-    ssl_ctx = ssl.create_default_context()
-    ssl_ctx.check_hostname = False
-    ssl_ctx.verify_mode = ssl.CERT_NONE
-    base_hdrs = {
-        # Unity-style headers are required for OB55 MajorLogin (Dalvik → SignError1)
-        'User-Agent': 'UnityPlayer/2018.4.12f1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)',
-        'Accept': '*/*',
-        'Accept-Encoding': 'deflate, gzip',
-        'X-Ga-Sv': '1789534056',
-        'X-Unity-Version': '2018.4.12f1',
-        'X-GA': 'v1 1',
-        'ReleaseVersion': release_version or 'OB55',
-        'Content-Type': 'application/x-www-form-urlencoded',
-    }
-    async with aiohttp.ClientSession() as session:
-        for url in _servers:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            host = parsed.hostname or ""
-            # Try hostname first (best TLS/SNI), then Cloudflare IP as fallback
-            connect_targets = [url]
-            try:
-                ip = await resolve_host_cloudflare(host) if host else None
-                if ip and ip != host:
-                    connect_targets.append(url.replace(f"://{host}", f"://{ip}", 1))
-            except Exception:
-                pass
-
-            for connect_url in connect_targets:
-                try:
-                    hdrs = dict(base_hdrs)
-                    if host and connect_url != url:
-                        hdrs["Host"] = host
-                    async with session.post(connect_url, data=payload, headers=hdrs, ssl=ssl_ctx) as resp:
-                        body = await resp.read()
-                        if b'Protection Bypass' in body:
-                            print_warning(f"[IND MAJORLOGIN] Protection Bypass via {host or url} (anti-bot fingerprint)")
-                            continue
-                        if resp.status == 200 and body and b'SignError' not in body[:32]:
-                            print_success(f"[IND MAJORLOGIN] 200 via {host or url}")
-                            return body
-                        print_warning(f"[IND MAJORLOGIN] {resp.status} via {host or url}: {body[:60]}")
-                        # SignError / 400 → payload issue, no point retrying same payload on other IPs of same host
-                        if resp.status == 400 or (body and b'SignError' in body[:32]):
-                            break
-                        if resp.status not in (503, 502, 504, 429):
-                            break
-                except Exception as e:
-                    print_warning(f"[IND MAJORLOGIN] {connect_url} failed: {e}")
-                    continue
-    return None
+AES_KEY = b'Yg&tc%DEuh6%Zc^8'
+AES_IV = b'6oyZDr22E3ychjM%'
 
 CRC7_TABLE = bytes([
     0, 9, 18, 27, 36, 45, 54, 63, 72, 65, 90, 83, 108, 101, 126, 119,
@@ -417,35 +264,23 @@ _FIELD_SIZES = {0: 1, 1: 2, 2: 2, 3: 1, 4: 2}
 _FIELD_NAMES = {0: "sendOption", 1: "cmd", 2: "orderId", 3: "flags", 4: "length"}
 
 sai_tail_dul = bytes.fromhex(
-    "474752450101010062020000a78910bd098e3ff2e4345d59a31db114ea088f37e32e65"
-    "212ff96621793d9eb78720d0bf2ac95176569765247ada5eb01376b3b9931794a4946"
-    "d76ef8890779f3f2129317e6e1cb2fdcf7b06247cea343b8d4f167eff85a2e1dfe99"
-    "b4583a7e1a155dbe7f7f85cff3b223eb77222ec1228f3ee1ef6ce7f8ca24b00a554"
-    "e497328812f8df74c82d519ae3e3ceab436eb145e8a517089a7cef6a4efb22214b2"
-    "a4b19989b74807584afe5e52825e7ac60e19a596a9bf02d961de6a0ed2515ec6023"
-    "fdb7684d9464b97b21c527ce61b6bee4ef30d20a1fa33a996952d44d44e44f2f86c"
-    "768aaf2a7808ad60f91048dca0207961ba7c2555c48341b30190debc775edb2cee24"
-    "4cf51fca3760ce4388be2db45e80b813b5beb9c784007b7762d7a1e428affc8a3a4"
-    "cd76cbaef648a274297fde33233dccd3f272cb77f39a1affe0365a24954111f768f72"
-    "0e77535af024bea2b2726c3bac992374755c3deacf09235e6865d456e651680d115a"
-    "751a797225eaacdf9a513cf104526e1a32e5296e111a33ae581a63850837921df848"
-    "9adfd41ea895b7cf3f5b2e45d538a6e4f032f590ccbb7daf5fa9c50adadee0799661"
-    "4c3f957bda349e6c484fdf55970d1943ad7955a76671298b6d98b636b69ebde6bc94"
-    "dbd93ac3393a6ae230130445b2d744189167854a5617be2393e7d8fbb5719a1b4754"
-    "1ba466167e3e05a6c244f1301ee2035acf94dffc8adbde747d5cd85e35ead3acc372"
-    "a59c4220e54bf63f9d80485f3de2518495c1d0f78c911d2da595911fd2a1989cf17"
-    "cf3ded5f6c92dea64d675c555c11df92d6c517ca5d0d61a8962f43f76ec7e87596c"
-    "8325ebf9ab0f8e6d2eca33c511ceac6980906ebd68c478665591dcecf788ec6ef34c"
-    "fbe3fcc279c6147c5bf91cd43cdc9704236"
+    "0101030101045452000103000100000410312e3133302e3232"
+    "1432303139313231303430ca0163736f7665727365612e737472"
+    "6f6e67686f6c642e66726565666972656d6f62696c652e636f6d"
+    "3b302e302e302e303b33342e3132362e37362e34353b33342e38"
+    "372e3137372e31343b33342e38372e3137302e3233303b33352e"
+    "3138352e3138332e353700000000000001000000000000000000"
+    "0000000100000000000100000000000100b8eeec91c5d7ffde110200"
 )
 
 headers = {
-    'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 11; ASUS_Z01QD Build/PI)',
+    'User-Agent': 'UnityPlayer/2018.4.12f1 (UnityWebRequest/1.0, libcurl/8.5.0-DEV)',
     'Connection': 'Keep-Alive',
     'Accept-Encoding': 'gzip',
     'Content-Type': 'application/x-www-form-urlencoded',
     'Expect': '100-continue',
-    'X-Unity-Version': '2018.4.11f1',
+    'X-Unity-Version': '2018.4.12f1',
+    'X-GA-SV': '1789535859',
     'X-GA': 'v1 1',
     'ReleaseVersion': 'OB55'
 }
@@ -595,34 +430,6 @@ def _save_token_cache(cache: Dict[str, Any]):
     except Exception as e:
         print_error(f"Token cache save error: {e}")
 
-def _is_valid_session(entry: Dict) -> bool:
-    """Reject incomplete / anti-bot-rejected sessions before cache use or save."""
-    if not isinstance(entry, dict):
-        return False
-    try:
-        acc = entry.get("account_id")
-        if acc is None or int(acc) <= 0:
-            return False
-    except Exception:
-        return False
-    token = entry.get("token")
-    if not token or not isinstance(token, str) or len(token) < 20:
-        return False
-    url = entry.get("server_url") or entry.get("url") or ""
-    if not url:
-        return False
-    for k in ("aes_ak", "iv_i"):
-        v = entry.get(k)
-        if isinstance(v, str):
-            # allow hex-encoded keys
-            try:
-                v = bytes.fromhex(v) if all(c in "0123456789abcdefABCDEF" for c in v) and len(v) % 2 == 0 else v.encode()
-            except Exception:
-                return False
-        if not isinstance(v, (bytes, bytearray)) or len(v) not in (16, 24, 32):
-            return False
-    return True
-
 def cache_get(uid: str) -> Optional[Dict]:
     cache = _load_token_cache()
     entry = cache.get(str(uid))
@@ -634,29 +441,13 @@ def cache_get(uid: str) -> Optional[Dict]:
         return None
     if str(entry.get("account_id", "")).isdigit():
         entry["account_id"] = int(entry["account_id"])
-    # Normalize hex-string AES keys back to bytes if needed
-    for k in ("aes_ak", "iv_i"):
-        v = entry.get(k)
-        if isinstance(v, str):
-            try:
-                if all(c in "0123456789abcdefABCDEF" for c in v) and len(v) % 2 == 0:
-                    entry[k] = bytes.fromhex(v)
-            except Exception:
-                pass
     if not isinstance(entry.get("login_payload_data"), (bytes, bytearray)):
         print_warning(f"[CACHE] UID {uid} missing payload → invalidating")
-        cache_invalidate(uid)
-        return None
-    if not _is_valid_session(entry):
-        print_warning(f"[CACHE] UID {uid} invalid session (bad uid/AES/token) → invalidating")
         cache_invalidate(uid)
         return None
     return entry
 
 def cache_set(uid: str, account_data: Dict):
-    if not _is_valid_session(account_data):
-        print_warning(f"[CACHE] Refusing to save invalid session for {uid}")
-        return
     cache = _load_token_cache()
     entry = dict(account_data)
     entry["cached_at"] = time.time()
@@ -678,98 +469,48 @@ async def aes_encrypt(payload, key, iv):
     cipher = AES.new(key, AES.MODE_CBC, iv)
     return cipher.encrypt(pad(payload, AES.block_size))
 
-# Hardcoded fallbacks (synced with live version API as of 2026-09-30)
-_FALLBACK_RELEASE = "OB55"
-_FALLBACK_CLIENT  = "1.132.9"
-_FALLBACK_SERVER  = "https://loginbp.ppmainecoonghj.com/"
-
 async def get_playstore_version():
-    """Best-effort Play Store version. Never raises — returns fallback on any network/DNS error."""
-    try:
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: play_scraper('com.dts.freefireth', lang='hi', country='id')
-        )
-        ver = result.get("version") if result else None
-        if ver:
-            return ver
-    except Exception as e:
-        print_warning(f"[VERSION] Play Store scrape failed ({e}). Using fallback.")
-    return _FALLBACK_CLIENT
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: play_scraper('com.dts.freefireth', lang='hi', country='id')
+    )
+    return result.get("version")
 
-async def _fetch_version_api(app_version: str, region: str = "BD"):
-    """
-    Try hostname first (most reliable), then Cloudflare-resolved IP as backup.
-    Some CDN edges return 503 when hit by raw IP even with Host header.
-    """
-    host = "version.ggwhitehawk.com"
-    api_path = (
-        f"/live/ver.php?version={app_version}"
+async def version_config():
+    # Hardcoded OB55 fallbacks (version API often 503)
+    FALLBACK = ("OB55", "1.132.9", "https://loginbp.ppmainecoonghj.com/")
+    try:
+        app_version = await get_playstore_version()
+    except Exception:
+        app_version = "1.132.9"
+    api_url = (
+        "https://version.ggwhitehawk.com/live/ver.php"
+        f"?version={app_version}"
         "&lang=hi&device=android&channel=android"
-        f"&appstore=googleplay&region={region}"
+        "&appstore=googleplay&region=ind"
         "&whitelist_version=1.3.0&whitelist_sp_version=1.0.0"
     )
-    headers_v = {
-        "Host": host,
-        "User-Agent": headers.get("User-Agent", "Dalvik/2.1.0 (Linux; U; Android 11; ASUS_Z01QD Build/PI)"),
-        "Accept": "application/json, text/plain, */*",
-        "Connection": "close",
-    }
-    candidates = [f"https://{host}{api_path}"]
     try:
-        ip = await resolve_host_cloudflare(host)
-        if ip and ip != host:
-            candidates.append(f"https://{ip}{api_path}")
-    except Exception:
-        pass
-
-    last_err = None
-    for url in candidates:
-        try:
-            response = await client.get(url, headers=headers_v)
-            if response.status_code == 503:
-                last_err = f"503 on {url.split('/')[2]}"
-                continue
-            response.raise_for_status()
+        response = await client.get(api_url)
+        if response.status_code == 200:
             data = response.json()
             server_url = data.get("server_url")
             remote_version = data.get("remote_version")
             latest_release_version = data.get("latest_release_version")
             if server_url and remote_version and latest_release_version:
+                print_success(f"[VERSION] OK → release={latest_release_version} client={remote_version}")
                 return latest_release_version, remote_version, server_url
-            last_err = "incomplete JSON fields"
-        except Exception as e:
-            last_err = e
-            continue
-    raise RuntimeError(str(last_err) if last_err else "version API unreachable")
-
-async def version_config():
-    """Fetch version config. Always returns a usable tuple (never None) so login can proceed offline."""
-    app_version = await get_playstore_version()
-    try:
-        result = await _fetch_version_api(app_version, "BD")
-        print_success(f"[VERSION] OK → release={result[0]} client={result[1]} server={result[2]}")
-        return result
+        print_warning(f"[VERSION] API {response.status_code} → using OB55 fallback")
     except Exception as e:
-        print_warning(f"[VERSION] API failed ({e}). Using hardcoded fallbacks.")
-    return _FALLBACK_RELEASE, _FALLBACK_CLIENT, _FALLBACK_SERVER
-
-async def _version_config_region(region: str):
-    """Fetch version config for a specific region. Falls back to hardcoded values."""
-    try:
-        app_version = await get_playstore_version()
-        return await _fetch_version_api(app_version, region)
-    except Exception as e:
-        print_warning(f"[VERSION] region={region} failed ({e}). Using fallbacks.")
-    return _FALLBACK_RELEASE, _FALLBACK_CLIENT, _FALLBACK_SERVER
-
+        print_warning(f"[VERSION] failed ({e}) → using OB55 fallback")
+    return FALLBACK
 
 async def get_access_token(uid, password):
     url = "https://100067.connect.garena.com/oauth/guest/token/grant"
     hdrs = {
         "Host": "100067.connect.garena.com",
-        "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 11; ASUS_Z01QD Build/PI)",
+        "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 12; SM-G998B Build/SP1A.210812.016)",
         "Content-Type": "application/x-www-form-urlencoded",
         "Accept-Encoding": "gzip, deflate, br",
         "Connection": "close"
@@ -825,9 +566,9 @@ async def build_majorlogin_payload(open_id, access_token, platform, client_versi
         proto = thunderFF_pb2.MajorLoginReq()
         proto.event_time = str(datetime.now())[:-7]
         proto.game_name = "free fire"
-        proto.platform_id = 1 if str(platform) in ["1", "4"] else int(platform)
+        proto.platform_id = 4 if str(platform) in ["4", "guest"] else (1 if str(platform) in ["1"] else int(platform) if str(platform).isdigit() else 4)
         proto.client_version = client_version
-        proto.client_version_code = "2019120816"
+        proto.client_version_code = "2019121229"
         
         # --- INJECTING PERSISTENT DYNAMIC DEVICE DATA ---
         proto.system_software = device_info.get("system_software", "Android OS 12 / API-31 (SP1A.210812.016.C2/user.dxu.20260701.180839)")
@@ -836,78 +577,57 @@ async def build_majorlogin_payload(open_id, access_token, platform, client_versi
         proto.screen_width = int(device_info.get("screen_width", 1600))
         proto.screen_height = int(device_info.get("screen_height", 900))
         proto.screen_dpi = str(device_info.get("screen_dpi", "300"))
-        proto.processor_details = device_info.get("processor_details", "ARM64 FP ASIMD AES | 2352 | 8")
+        proto.processor_details = device_info.get("processor_details", "ARM64 FP ASIMD AES | 2400 | 8")
         proto.memory = int(device_info.get("memory", 5951))
         proto.gpu_renderer = device_info.get("gpu_renderer", "Adreno (TM) 640")
         proto.unique_device_id = device_info.get("unique_device_id", "Google|725030d8-6585-4f55-bcca-a6df7e59935b")
-        proto.client_ip = device_info.get("client_ip", "49.36.100.210")
+        proto.client_ip = device_info.get("client_ip", "103.145.112.210")
         # ------------------------------------------------
         
-        proto.system_software = "Android OS 13 / API-33 (TP1A.220905.001/R.206769c-2)"
-        proto.system_hardware = "Handheld"
-        proto.telecom_operator = "45403"
-        proto.network_operator_a = "45403"
+        proto.telecom_operator = "Citycell"
+        proto.network_operator_a = "Citycell"
         proto.network_type = "WIFI"
         proto.network_type_a = "WIFI"
         proto.cpu_type = 2
         proto.cpu_architecture = "64"
-        proto.gpu_renderer = "Mali-G610"
-        proto.gpu_version = "OpenGL ES 3.2 v1.g18p0-01eac0.2d5e200a1514bdef1a4909db66e37e28"
+        proto.gpu_version = "OpenGL ES 3.2"
         proto.graphics_api = "OpenGLES2"
         proto.language = "en"
-        proto.screen_width = 1280
-        proto.screen_height = 720
-        proto.screen_dpi = "320"
-        proto.memory = 128
-        proto.device_type = "Handheld"
-        try:
-            proto.device_model = "OPPO CPH2217"
-        except Exception:
-            pass
-        proto.unique_device_id = device_info.get("unique_device_id", "Google|7a9732a4-2549-4edc-840e-d61263d128f5")
-        proto.client_ip = "162.128.224.168"
         proto.open_id = open_id
-        proto.open_id_type = "4"
-        proto.login_open_id_type = 4
+        proto.open_id_type = str(platform)
+        proto.login_open_id_type = int(platform)
         proto.access_token = access_token
         proto.login_by = 3
-        proto.platform_sdk_id = 1
-        proto.origin_platform_type = "4"
-        proto.primary_platform_type = "4"
+        proto.platform_sdk_id = 2
+        proto.origin_platform_type = str(platform)
+        proto.primary_platform_type = str(platform)
         proto.reg_avatar = 1
-        proto.channel_type = 6
-        try:
-            proto.region = "IND"
-        except Exception:
-            pass
-        proto.external_storage_total = 20660
-        proto.external_storage_available = 17445
-        proto.internal_storage_total = 2663
-        proto.internal_storage_available = 1500
-        proto.game_disk_storage_total = 20660
-        proto.game_disk_storage_available = 17573
-        proto.external_sdcard_total_storage = 20660
-        proto.external_sdcard_avail_storage = 17573
-        proto.library_path = "/data/app/~~xHaSHUdUBlxvhJaRWh018A==/com.dts.freefireth-4OBn7-sLMoPuswIfmgixhA==/lib/arm64"
-        proto.library_token = "4c322aeb56444feaa151d1ea91a8f7f2|/data/app/~~xHaSHUdUBlxvhJaRWh018A==/com.dts.freefireth-4OBn7-sLMoPuswIfmgixhA==/base.apk"
-        proto.client_using_version = "1ac4b80ecf0478a44203bf8fac6120f5"
-        proto.supported_astc_bitset = 16383
-        proto.analytics_detail = b"FwQVTgUPX1UaUllDDwcWCRBpWA0FUgsvA1snWlBaO1kFYg=="
-        proto.loading_time = 25777
-        proto.release_channel = "3rd_party"
-        proto.extra_info = "KqsHTz+zAigQ0BOzKhQHN8ae/IefLXcroDjaj4QY+OF71nTuiQh+myDUqCZFPJQ5gyC9LfEeKoon9d461764VIGguRHcIyKfExGAh4bvxFZRgp2X"
-        try:
-            proto.extra_json = '{"cur_rate":null,"support_etc2":false}'
-        except Exception:
-            pass
-        proto.android_engine_init_flag = 110009
+        proto.channel_type = 3
+        
+        memory_available = proto.memory_available
+        memory_available.version = 55
+        memory_available.hidden_value = 81
+        
+        proto.external_storage_total = 34308
+        proto.external_storage_available = 30777
+        proto.internal_storage_total = 2519
+        proto.internal_storage_available = 243
+        proto.game_disk_storage_total = 34308
+        proto.game_disk_storage_available = 32224
+        proto.external_sdcard_total_storage = 34308
+        proto.external_sdcard_avail_storage = 32224
+        
+        proto.library_path = "/data/app/~~UKDdGuy32C5yOa0KZe_ROA==/com.dts.freefireth-UAKF1gjDbXSGfpA07JDTKQ==/lib/arm64"
+        proto.library_token = "b8e0cd5e295eee42f5860d3c86e483dd|/data/app/~~UKDdGuy32C5yOa0KZe_ROA==/com.dts.freefireth-UAKF1gjDbXSGfpA07JDTKQ==/base.apk"
+        proto.client_using_version = "7428b253defc164018c604a1ebbfebdf"
+        proto.supported_astc_bitset = 4095
+        proto.analytics_detail = b"FwQVTgUPX1UaUllDDwcWCRBpWAUOUgsvA1snWlBaO1kFYg=="
+        proto.loading_time = 14582
+        proto.release_channel = "android"
+        proto.extra_info = "KqsHT4tDHGqm9PQ3syB24XA4N6SWy/Q/HfMFTQM+SgxmVqsgPK138ajtCFyVNW/Q7p6hxoenpRjeZ2NphiIosCZ3YDkONB5NAa+zTwNo7iabx/mj"
+        proto.android_engine_init_flag = 111207
         proto.if_push = 1
-        proto.is_vpn = 1
-        try:
-            proto.unknown_int85 = 3
-            proto.unknown_bytes102 = b"E1JMTwcJXjA2"
-        except Exception:
-            pass
+        proto.is_vpn = 0
         
         payload = proto.SerializeToString()
         return await aes_encrypt(payload, AES_KEY, AES_IV)
@@ -916,15 +636,16 @@ async def build_majorlogin_payload(open_id, access_token, platform, client_versi
 
 async def send_majorlogin(data, release_version, server_url):
     try:
-        url = "https://loginbp.ggblueshark.com/MajorLogin"
+        url = f"{server_url}MajorLogin"
         req_headers = headers.copy()
         req_headers["ReleaseVersion"] = release_version
         response = await client.post(url, headers=req_headers, data=data)
-        print_info(f"[MAJORLOGIN] {response.status_code} | {url} | {len(response.content)}b")
         if response.status_code != 200:
-            print_error(f"[MAJORLOGIN] Failed {response.status_code}: {response.content[:100]}")
             return None
         response_content = response.content
+        if b"Protection Bypass" in response_content:
+            print_warning("[MAJORLOGIN] Protection Bypass (anti-bot) — try fresh guest UID/password, not recycled token")
+            return None
         if len(response_content) < 40:
             return None
 
@@ -965,24 +686,11 @@ async def send_majorlogin(data, release_version, server_url):
 
 async def send_getlogin(data, base_url, token, release_version):
     try:
-        from urllib.parse import urlparse
-        base_url = base_url.rstrip('/')
-        parsed = urlparse(base_url if "://" in base_url else f"https://{base_url}")
-        host = parsed.hostname or base_url
-        ip = await resolve_host_cloudflare(host)
-        path = (parsed.path or "") + "/GetLoginData"
-        if ip and ip != host:
-            url = f"https://{ip}{path}"
-            host_hdr = host
-        else:
-            url = f"https://{host}{path}" if not base_url.startswith("http") else f"{base_url}/GetLoginData"
-            host_hdr = None
+        url = f"{base_url.rstrip('/')}/GetLoginData"
         req_headers = headers.copy()
         req_headers["ReleaseVersion"] = release_version
         req_headers['Authorization'] = f"Bearer {token}"
-        req_headers.pop('Host', None)
-        if host_hdr:
-            req_headers["Host"] = host_hdr
+        req_headers['Host'] = "clientbp.ppmainecoonghj.com"
         response = await client.post(url, headers=req_headers, data=data)
         if response.status_code != 200:
             return None
@@ -1019,25 +727,25 @@ async def send_getlogin(data, base_url, token, release_version):
     except Exception:
         return None
 
-async def build_tcp_startup_packet(account_id, token, server_time, key, iv, region="BD", typ='OnLine'):
+async def build_tcp_startup_packet(account_id, token, server_time, key, iv, region="ind", typ='OnLine'):
     uid_hex = f"{int(account_id):016x}"
     timestamp_hex = f"{int(server_time):08x}"
     encode_token = token.encode()
     encrypted_packet = (await aes_encrypt(encode_token, key, iv)).hex()
     encrypted_packet_length = f"{len(encrypted_packet) // 2:08x}"
-    reg = str(region).upper() if region else "BD"
+    reg = str(region).upper() if region else "ind"
     if typ == 'OnLine':
-        prefix = '7119' if reg == 'BD' else ('7114' if reg == 'IND' else '7115')
+        prefix = '7119' if reg == 'ind' else ('7114' if reg == 'IND' else '7115')
         return f"{prefix}{uid_hex}{timestamp_hex}00000000{encrypted_packet_length}{encrypted_packet}"
     else:  # ChaT / Informational
-        prefix = '9219' if reg == 'BD' else ('9214' if reg == 'IND' else '9215')
+        prefix = '9219' if reg == 'ind' else ('9214' if reg == 'IND' else '9215')
         return f"{prefix}{uid_hex}{timestamp_hex}{encrypted_packet_length}{encrypted_packet}"
 
-async def send_keep_alive(region="BD"):
+async def send_keep_alive(region="ind"):
     """Send 2-byte keep-alive pulse to maintain connection in OB55"""
     try:
-        reg = str(region).upper() if region else "BD"
-        ka_hex = "0219" if reg == "BD" else ("0214" if reg == "IND" else "0215")
+        reg = str(region).upper() if region else "ind"
+        ka_hex = "0219" if reg == "ind" else ("0214" if reg == "IND" else "0215")
         return bytes.fromhex(ka_hex)
     except Exception:
         return bytes.fromhex("0219")
@@ -1162,7 +870,7 @@ async def sv_frame(msg_key, layout, send_option, cmd, order_id, flags, content, 
     return bytes(packet)
 
 async def build_match_startup_packets(token, udp_key, match_code, account_id, block_val,
-                                      server_ip="", region="BD", client_version="1.132.6",
+                                      server_ip="", region="ind", client_version="1.132.6",
                                       client_version_code="2019121229", access_token=""):
     token = token.strip()
     udp_key = bytes.fromhex(udp_key)
@@ -1177,7 +885,7 @@ async def build_match_startup_packets(token, udp_key, match_code, account_id, bl
     garena420 = await has_ssan_zig(len(encoded_thunder_jwt)) + encoded_thunder_jwt
     
     # OB55 Sharma payload structure matching Wireshark capture
-    reg = str(region).upper() if region else "BD"
+    reg = str(region).upper() if region else "ind"
     csoversea_block = bytes.fromhex(
         "ca0163736f7665727365612e7374726f6e67686f6c642e66726565666972656d6f62696c652e636f6d"
         "3b302e302e302e303b33342e3132362e37362e34353b33342e38372e3137372e31343b33342e38372e"
@@ -1478,9 +1186,6 @@ async def play_game(server_ip_port, thunder, sharma, udp_key, match_code,
 
         while not local_closed:
             if time.time() - match_start_time > MAX_MATCH_DURATION:
-                if thunder_sent:
-                    completed_cleanly = True
-                    print_success(f"[MATCH] Max duration — counting as complete")
                 break
             try:
                 response, server_addr = await asyncio.wait_for(
@@ -1555,14 +1260,11 @@ async def play_game(server_ip_port, thunder, sharma, udp_key, match_code,
                         last_activity = time.time()
                     if (time.time() - match_start_time) > 25.0:
                         print_warning(f"[MATCH #{match_index}] Handshake timeout")
-                        if thunder_sent:
-                            completed_cleanly = True
                         break
                 elif ack_state == "thunder_sharma_sent":
                     if (time.time() - last_activity) > MATCH_IDLE_TIMEOUT:
-                        print_success(f"[MATCH #{match_index}] Finished naturally (idle)")
+                        print_success(f"[MATCH #{match_index}] Finished naturally")
                         completed_cleanly = True
-                        local_closed = True
                         break
                 continue
             except BlockingIOError:
@@ -1694,7 +1396,7 @@ async def functional_lone_wolf(addrs, starter_packet, account_region, client_ver
                 async def send_start_match():
                     nonlocal search_attempts, last_start_time
                     search_attempts += 1
-                    current_region = "IND"
+                    current_region = "ind"
                     print_info(f"[LONE WOLF] Sending StartMatch #{search_attempts} region: {current_region}")
                     try:
                         await asyncio.sleep(random.uniform(0.3, 0.6))
@@ -1812,7 +1514,7 @@ async def functional_lone_wolf(addrs, starter_packet, account_region, client_ver
                                         udp_key,
                                         match_code,
                                         effective_acc_id,
-                                        "IND",
+                                        "ind",
                                         client_version,
                                         current_key,
                                         current_iv,
@@ -1937,7 +1639,7 @@ async def functional_lone_wolf(addrs, starter_packet, account_region, client_ver
         raise
 
 
-async def informational(addrs, starter_packet, key, iv, region="BD", max_reconnects=3):
+async def informational(addrs, starter_packet, key, iv, region="ind", max_reconnects=3):
     reconnects = 0
     ip, port = addrs.split(":")
     while True:
@@ -2070,7 +1772,7 @@ async def process_account_uid_pass(uid: str, password: str) -> Optional[Dict]:
         bot_state.register_account(
             uid=acc_id,
             nickname=cached.get('nickname', f"Player_{acc_id}"),
-            region=cached.get('region', 'BD'),
+            region=cached.get('region', 'ind'),
             level=cached.get('level', 1),
             exp=cached.get('exp', 0),
             likes=cached.get('likes', 0)
@@ -2093,30 +1795,12 @@ async def process_account_uid_pass(uid: str, password: str) -> Optional[Dict]:
         # 🔥 1ta id 1ta Device Injection
         device_info = get_device_for_account(uid)
         
-        _ind_pl = await _ind_build_majorlogin(open_id, access_token)
-        _ind_raw = await _ind_send_majorlogin(_ind_pl, release_version)
-        if _ind_raw is None:
-            print_error("[LOGIN] MajorLogin returned no body")
+        login_payload_data = await build_majorlogin_payload(open_id, access_token, platform, client_version, device_info)
+        majorlogin_response = await send_majorlogin(login_payload_data, release_version, server_url)
+        if majorlogin_response is None:
             return None
-        if b"Protection Bypass" in _ind_raw or b"SignError" in _ind_raw:
-            print_error(f"[LOGIN] MajorLogin rejected: {_ind_raw[:80]!r}")
-            return None
-        majorlogin_response = MajoRLoGinrEs_pb2.MajorLoginRes()
-        majorlogin_response.ParseFromString(_ind_raw)
-        if not majorlogin_response.token or not majorlogin_response.url:
-            print_error(
-                f"[LOGIN] MajorLogin parse failed "
-                f"(token={bool(majorlogin_response.token)} url={bool(majorlogin_response.url)} "
-                f"uid={majorlogin_response.account_id} region={majorlogin_response.region!r})"
-            )
-            return None
-        print_success(
-            f"[LOGIN] MajorLogin OK uid={majorlogin_response.account_id} "
-            f"region={majorlogin_response.region} url={majorlogin_response.url}"
-        )
-        getlogin_result = await send_getlogin(_ind_pl, majorlogin_response.url, majorlogin_response.token, release_version)
+        getlogin_result = await send_getlogin(login_payload_data, majorlogin_response.url, majorlogin_response.token, release_version)
         if getlogin_result is None:
-            print_error("[LOGIN] GetLoginData failed")
             return None
         res_proto, dict_res = getlogin_result
 
@@ -2125,12 +1809,9 @@ async def process_account_uid_pass(uid: str, password: str) -> Optional[Dict]:
         exp = int(get_proto_field(dict_res, 7, 0))
         likes = int(get_proto_field(dict_res, 8, 0))
         nickname = res_proto.nickname or get_proto_field(dict_res, 4, f"Player_{acc_id}")
-        region = majorlogin_response.region or get_proto_field(dict_res, 3, "IND")
+        region = majorlogin_response.region or get_proto_field(dict_res, 3, "ind")
 
         bot_state.register_account(uid=acc_id, nickname=nickname, region=region, level=level, exp=exp, likes=likes)
-
-        # The encrypted MajorLogin payload is required later for GetLoginData / cache re-use
-        login_payload_data = _ind_pl
 
         account_data = {
             'account_id': majorlogin_response.account_id,
@@ -2156,14 +1837,6 @@ async def process_account_uid_pass(uid: str, password: str) -> Optional[Dict]:
             'auth_uid': uid,
             'auth_password': password
         }
-        if not _is_valid_session(account_data):
-            print_error(
-                f"[LOGIN] Session incomplete after MajorLogin "
-                f"(uid={account_data.get('account_id')} "
-                f"aes={len(account_data.get('aes_ak') or b'')} "
-                f"iv={len(account_data.get('iv_i') or b'')})"
-            )
-            return None
         _register_credentials(account_data)
         cache_set(uid, account_data)
         return account_data
@@ -2181,7 +1854,7 @@ async def process_account_token(access_token: str) -> Optional[Dict]:
         bot_state.register_account(
             uid=acc_id,
             nickname=cached.get('nickname', f"Player_{acc_id}"),
-            region=cached.get('region', 'BD'),
+            region=cached.get('region', 'ind'),
             level=cached.get('level', 1),
             exp=cached.get('exp', 0),
             likes=cached.get('likes', 0)
@@ -2195,77 +1868,18 @@ async def process_account_token(access_token: str) -> Optional[Dict]:
         if verconfig_res is None:
             return None
         release_version, client_version, server_url = verconfig_res
-        print_info(f"[LOGIN] Using server: {server_url}")
 
-        # Resolve via Smart DNS first so we survive broken system resolvers on Termux
-        _garena_host = "100067.connect.garena.com"
-        _garena_ip = await resolve_host_cloudflare(_garena_host)
-        url = f"https://{_garena_host}/oauth/token/inspect?token={access_token}"
-        if _garena_ip and _garena_ip != _garena_host:
-            url_by_ip = f"https://{_garena_ip}/oauth/token/inspect?token={access_token}"
-        else:
-            url_by_ip = url
+        import requests
+        url = f"https://100067.connect.garena.com/oauth/token/inspect?token={access_token}"
         hdrs = {
             "Accept-Encoding": "gzip, deflate, br",
             "Connection": "close",
             "Content-Type": "application/x-www-form-urlencoded",
-            "Host": _garena_host,
+            "Host": "100067.connect.garena.com",
             "User-Agent": "GarenaMSDK/4.0.19P4(G011A ;Android 9;en;US;)"
         }
-        # auto-fetch fresh socks5 proxies
-        async def _fetch_fresh_proxies():
-            sources = [
-                "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
-                "https://raw.githubusercontent.com/hookzof/socks5_list/master/proxy.txt",
-                "https://raw.githubusercontent.com/mmpx12/proxy-list/master/socks5.txt",
-                "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/socks5.txt",
-            ]
-            found = []
-            for src in sources:
-                try:
-                    async with httpx.AsyncClient(verify=False, timeout=8.0) as _fc:
-                        r = await _fc.get(src)
-                        lines = [l.strip() for l in r.text.strip().split('\n') if ':' in l.strip()]
-                        found.extend([f"socks5://{l}" for l in lines[:12]])
-                    if found:
-                        break
-                except Exception:
-                    continue
-            return found
-
-        _fresh = await _fetch_fresh_proxies()
-        _proxy_list = [None] + (_fresh if _fresh else [
-            "socks5://72.195.34.58:4145",
-            "socks5://98.162.25.7:31653",
-            "socks5://192.111.137.35:4145",
-            "socks5://98.162.96.41:4145",
-            "socks5://184.178.172.25:15291",
-        ])
-        data = None
-        last_exc = None
-        for _proxy in _proxy_list:
-            try:
-                _label = _proxy if _proxy else "direct"
-                print_info(f"[LOGIN] Trying inspect via {_label}...")
-                _client_kwargs = {"verify": False, "timeout": 20.0}
-                if _proxy:
-                    _client_kwargs["proxy"] = _proxy
-                async with httpx.AsyncClient(**_client_kwargs) as _ic:
-                    # Prefer IP+Host when available (bypasses broken system DNS)
-                    try:
-                        resp = await _ic.get(url_by_ip, headers=hdrs)
-                    except Exception:
-                        resp = await _ic.get(url, headers=hdrs)
-                    data = resp.json()
-                    print_success(f"[LOGIN] Inspect success via {_label}")
-                    break
-            except Exception as _e:
-                last_exc = _e
-                print_warning(f"[LOGIN] {_label} failed: {_e}")
-                await asyncio.sleep(1)
-        if data is None:
-            print_error(f"[LOGIN] All proxies failed: {last_exc}")
-            return None
+        resp = await asyncio.to_thread(requests.get, url, headers=hdrs, timeout=10)
+        data = resp.json()
 
         if 'error' in data:
             return None
@@ -2279,40 +1893,21 @@ async def process_account_token(access_token: str) -> Optional[Dict]:
         # 🔥 1ta id 1ta Device Injection (using unique open_id as the key)
         device_info = get_device_for_account(open_id)
 
-        _ind_pl2 = await _ind_build_majorlogin(open_id, access_token)
-        if not _ind_pl2:
+        login_payload_data = await build_majorlogin_payload(open_id, access_token, str(platform), client_version, device_info)
+        if not login_payload_data:
             return None
 
-        _ind_raw2 = await _ind_send_majorlogin(_ind_pl2, release_version)
-        if _ind_raw2 is None:
-            print_error("[LOGIN] MajorLogin returned no body")
+        majorlogin_response = await send_majorlogin(login_payload_data, release_version, server_url)
+        if majorlogin_response is None:
             return None
-        if b"Protection Bypass" in _ind_raw2 or b"SignError" in _ind_raw2:
-            print_error(f"[LOGIN] MajorLogin rejected: {_ind_raw2[:80]!r}")
-            return None
-        majorlogin_response = MajoRLoGinrEs_pb2.MajorLoginRes()
-        majorlogin_response.ParseFromString(_ind_raw2)
-        if not majorlogin_response.token or not majorlogin_response.url:
-            print_error(
-                f"[LOGIN] MajorLogin parse failed "
-                f"(token={bool(majorlogin_response.token)} url={bool(majorlogin_response.url)} "
-                f"uid={majorlogin_response.account_id} region={majorlogin_response.region!r} "
-                f"raw_len={len(_ind_raw2)})"
-            )
-            return None
-        print_success(
-            f"[LOGIN] MajorLogin OK uid={majorlogin_response.account_id} "
-            f"region={majorlogin_response.region} url={majorlogin_response.url}"
-        )
 
         getlogin_result = await send_getlogin(
-            _ind_pl2,
+            login_payload_data,
             majorlogin_response.url,
             majorlogin_response.token,
             release_version
         )
         if getlogin_result is None:
-            print_error("[LOGIN] GetLoginData failed")
             return None
 
         res_proto, dict_res = getlogin_result
@@ -2321,12 +1916,9 @@ async def process_account_token(access_token: str) -> Optional[Dict]:
         exp = int(get_proto_field(dict_res, 7, 0))
         likes = int(get_proto_field(dict_res, 8, 0))
         nickname = res_proto.nickname or get_proto_field(dict_res, 4, f"Player_{acc_id}")
-        region = majorlogin_response.region or get_proto_field(dict_res, 3, "IND")
+        region = majorlogin_response.region or get_proto_field(dict_res, 3, "ind")
 
         bot_state.register_account(uid=acc_id, nickname=nickname, region=region, level=level, exp=exp, likes=likes)
-
-        # The encrypted MajorLogin payload is required later for GetLoginData / cache re-use
-        login_payload_data = _ind_pl2
 
         account_data = {
             'account_id': majorlogin_response.account_id,
@@ -2352,15 +1944,6 @@ async def process_account_token(access_token: str) -> Optional[Dict]:
             'auth_type': 'token',
             'auth_token': access_token
         }
-        if not _is_valid_session(account_data):
-            print_error(
-                f"[LOGIN] Session incomplete after MajorLogin "
-                f"(uid={account_data.get('account_id')} "
-                f"aes={len(account_data.get('aes_ak') or b'')} "
-                f"iv={len(account_data.get('iv_i') or b'')} "
-                f"token={bool(account_data.get('token'))})"
-            )
-            return None
         _register_credentials(account_data)
         cache_set(cache_key, account_data)
         return account_data
@@ -2370,22 +1953,11 @@ async def process_account_token(access_token: str) -> Optional[Dict]:
 
 
 async def run_account_worker(account_data: Dict, label: str):
-    acc_id = str(account_data.get('account_id', 0))
+    acc_id = str(account_data['account_id'])
     informational_task = None
     exp_task = None
     try:
-        if not _is_valid_session(account_data):
-            raise ValueError(
-                f"invalid session uid={acc_id} "
-                f"aes_len={len(account_data.get('aes_ak') or b'')} "
-                f"iv_len={len(account_data.get('iv_i') or b'')}"
-            )
-        # Ensure AES materials are bytes of valid length
-        for k in ("aes_ak", "iv_i"):
-            v = account_data.get(k)
-            if isinstance(v, str):
-                account_data[k] = bytes.fromhex(v) if all(c in "0123456789abcdefABCDEF" for c in v) else v.encode()
-        reg = account_data.get('region', 'BD')
+        reg = account_data.get('region', 'ind')
         tcp_packet_online = await build_tcp_startup_packet(
             account_data['account_id'],
             account_data['token'],
@@ -2550,7 +2122,7 @@ async def main():
 
     try:
         await start_web_dashboard(host=WEB_HOST, port=WEB_PORT)
-        print_success(f"Web Dashboard live at http://localhost:{WEB_PORT}")
+        print_success(f"Web Dashboard live at {PUBLIC_URL} (bind :{WEB_PORT})")
     except Exception as e:
         print_error(f"Could not start web dashboard: {e}")
 
@@ -2575,7 +2147,7 @@ async def main():
 
     if not accounts:
         print_warning(f"No accounts found in {ACCOUNTS_FILE}! Add accounts from Web Dashboard.")
-        print_warning(f"Open: http://localhost:{WEB_PORT}")
+        print_warning(f"Open: {PUBLIC_URL}")
 
     for acc in accounts:
         if "token" in acc and acc["token"]:

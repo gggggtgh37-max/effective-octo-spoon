@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: levels-bot
+    name: effective-octo-spoon
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python LEVELS.py
+    startCommand: python main.py
     envVars:
-      - key: PORT
-        value: 10000
+      - key: PUBLIC_URL
+        value: https://effective-octo-spoon.onrender.com
     plan: free
