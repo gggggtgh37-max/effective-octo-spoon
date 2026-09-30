@@ -35,7 +35,6 @@ from dashboard_server import bot_state, start_web_dashboard
 
 # ==================== CONFIGURATION ====================
 WEB_HOST = "0.0.0.0"
-# Render sets PORT env (usually 10000). Local default 20335.
 WEB_PORT = int(os.environ.get("PORT", "20335"))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "https://effective-octo-spoon.onrender.com")
 ACCOUNTS_FILE = "accounts.json"
