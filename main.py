@@ -1289,6 +1289,13 @@ async def play_game(server_ip_port, thunder, sharma, udp_key, match_code,
                 bot_state.increment_match(uid_str)
             except Exception:
                 pass
+            # Real EXP only — refresh profile from GetLoginData after each match
+            try:
+                ad = bot_state.account_credentials.get(uid_str)
+                if ad:
+                    asyncio.create_task(refresh_account_profile(ad))
+            except Exception:
+                pass
         ping_stop.set()
         if ping_task:
             ping_task.cancel()
@@ -1745,21 +1752,70 @@ async def refresh_account_profile(account_data_or_uid: Any):
             return
 
         res = await send_getlogin(payload, url, token, release_version)
-        if res:
-            res_proto, dict_res = res
-            level = int(get_proto_field(dict_res, 6, 1))
-            exp = int(get_proto_field(dict_res, 7, 0))
-            likes = int(get_proto_field(dict_res, 8, 0))
-            nickname = res_proto.nickname or get_proto_field(dict_res, 4, "")
+        if not res:
+            return
+        res_proto, dict_res = res
 
-            acc_id = str(account_data['account_id'])
-            if exp > 0:
-                bot_state.update_exp(acc_id, exp, level)
-            if likes > 0 and acc_id in bot_state.accounts:
-                bot_state.accounts[acc_id]["likes"] = likes
-            if nickname and acc_id in bot_state.accounts:
-                bot_state.accounts[acc_id]["nickname"] = nickname
-            print_info(f"[EXP-REFRESH] UID {acc_id} -> Level: {level}, EXP: {exp}")
+        # Real profile fields from GetLoginData (server only)
+        level = int(
+            get_proto_field(dict_res, 6, None)
+            or getattr(res_proto, "level", None)
+            or get_proto_field(dict_res, 5, None)
+            or 0
+        )
+        exp = int(
+            get_proto_field(dict_res, 7, None)
+            or getattr(res_proto, "exp", None)
+            or get_proto_field(dict_res, 15, None)
+            or get_proto_field(dict_res, 16, None)
+            or get_proto_field(dict_res, 9, None)
+            or 0
+        )
+        # Fallback: scan numeric leaf fields for a plausible exp if still 0
+        if exp <= 0 and isinstance(dict_res, dict):
+            candidates = []
+            def _walk(obj, depth=0):
+                if depth > 4 or not isinstance(obj, dict):
+                    return
+                for k, v in obj.items():
+                    if isinstance(v, dict):
+                        if "data" in v and isinstance(v["data"], (int, float)) and not isinstance(v["data"], bool):
+                            n = int(v["data"])
+                            if 50 < n < 50_000_000:
+                                candidates.append(n)
+                        else:
+                            _walk(v, depth + 1)
+            _walk(dict_res)
+            # Prefer values near previous current_exp
+            prev = 0
+            try:
+                prev = int(bot_state.accounts.get(str(account_data.get("account_id")), {}).get("current_exp", 0) or 0)
+            except Exception:
+                pass
+            if candidates:
+                if prev > 0:
+                    near = [c for c in candidates if c >= prev]
+                    exp = min(near) if near else max(candidates)
+                else:
+                    exp = max(candidates)
+        likes = int(get_proto_field(dict_res, 8, 0) or 0)
+        nickname = (
+            getattr(res_proto, "nickname", None)
+            or get_proto_field(dict_res, 4, "")
+            or ""
+        )
+
+        acc_id = str(account_data['account_id'])
+        if level > 0 or exp > 0:
+            cur = bot_state.accounts.get(acc_id, {})
+            use_exp = exp if exp > 0 else int(cur.get("current_exp", 0) or 0)
+            use_level = level if level > 0 else int(cur.get("level", 1) or 1)
+            bot_state.update_exp(acc_id, use_exp, use_level)
+        if likes > 0 and acc_id in bot_state.accounts:
+            bot_state.accounts[acc_id]["likes"] = likes
+        if nickname and acc_id in bot_state.accounts:
+            bot_state.accounts[acc_id]["nickname"] = nickname
+        print_info(f"[EXP-REFRESH] UID {acc_id} -> Level: {level}, EXP: {exp} (server)")
     except Exception as e:
         print_error(f"refresh_account_profile error: {e}")
 
@@ -1990,7 +2046,7 @@ async def run_account_worker(account_data: Dict, label: str):
 
         async def exp_refresher():
             while True:
-                await asyncio.sleep(90)
+                await asyncio.sleep(30)
                 fresh = bot_state.account_credentials.get(acc_id)
                 if fresh:
                     await refresh_account_profile(fresh)
