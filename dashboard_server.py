@@ -45,8 +45,6 @@ class BotState:
                 "level": level or 1,
                 "initial_exp": exp,
                 "current_exp": exp,
-                "estimated_exp": exp,
-                "server_exp": exp,
                 "gained_exp": 0,
                 "likes": likes or 0,
                 "status": "ONLINE",
@@ -71,29 +69,19 @@ class BotState:
         self.recalc_totals()
 
     def update_exp(self, uid: str, current_exp: int, level: Optional[int] = None):
-        """Update from REAL server values only (GetLoginData)."""
         uid_str = str(uid)
-        if uid_str not in self.accounts:
-            return
-        acc = self.accounts[uid_str]
-        old_exp = int(acc.get("current_exp", 0) or 0)
-        server_exp = int(current_exp or 0)
-        if server_exp > 0:
-            acc["current_exp"] = server_exp
-            acc["server_exp"] = server_exp
-        if level is not None and int(level) > 0:
-            acc["level"] = int(level)
-        acc["gained_exp"] = max(0, int(acc.get("current_exp", 0) or 0) - int(acc.get("initial_exp", 0) or 0))
-        acc["last_updated"] = time.strftime("%H:%M:%S")
-        diff = int(acc.get("current_exp", 0) or 0) - old_exp
-        if diff > 0:
-            self.log(
-                f"Account {acc['nickname']} ({uid_str}) +{diff} EXP (server). "
-                f"Total Gained: +{acc['gained_exp']}",
-                "success",
-                uid_str,
-            )
-        self.recalc_totals()
+        if uid_str in self.accounts:
+            acc = self.accounts[uid_str]
+            old_exp = acc["current_exp"]
+            acc["current_exp"] = current_exp
+            if level is not None and level > 0:
+                acc["level"] = level
+            acc["gained_exp"] = max(0, current_exp - acc["initial_exp"])
+            acc["last_updated"] = time.strftime("%H:%M:%S")
+            diff = current_exp - old_exp
+            if diff > 0:
+                self.log(f"Account {acc['nickname']} ({uid_str}) gained +{diff} EXP! Total Gained: +{acc['gained_exp']}", "success", uid_str)
+            self.recalc_totals()
 
     def update_status(self, uid: str, status: str, active_matches: Optional[int] = None):
         uid_str = str(uid)
